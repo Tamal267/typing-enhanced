@@ -41,7 +41,9 @@ export function MultiplayerTyping({ roomState, participantId, onProgress, onComp
   }
 
   const calculateAccuracy = () => {
-    return totalChars > 0 ? Math.round((correctChars / totalChars) * 100) : 100
+    // If no words were attempted, accuracy should be 0
+    if (currentWordIndex === 0 && totalChars === 0) return 0
+    return totalChars > 0 ? Math.round((correctChars / totalChars) * 100) : 0
   }
 
   const handleTimeUp = () => {

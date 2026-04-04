@@ -349,9 +349,10 @@ export class RoomDurableObject {
     this.roomState.participants.forEach(p => {
       p.progress = 0
       p.currentWpm = 0
-      p.accuracy = 0
+      p.accuracy = 100  // Start at 100% accuracy
       p.completed = false
       p.finishedAt = undefined
+      p.wpm = undefined
     })
     
     // Update database
@@ -386,7 +387,8 @@ export class RoomDurableObject {
       .map(p => ({
         id: p.id,
         name: p.name,
-        wpm: p.currentWpm || 0,
+        // Use final wpm if completed, otherwise use currentWpm
+        wpm: p.completed && p.wpm !== undefined ? p.wpm : p.currentWpm || 0,
         accuracy: p.accuracy,
         completed: p.completed,
         finishedAt: p.finishedAt
