@@ -226,17 +226,19 @@ export class RoomDurableObject {
     const participant = this.roomState.participants.get(participantId)
     if (!participant) return
     
-    participant.progress = message.progress
-    participant.currentWpm = message.currentWpm
-    participant.accuracy = message.accuracy
+    participant.progress = message.progress || 0
+    participant.currentWpm = message.currentWpm || 0
+    participant.accuracy = message.accuracy ?? 0
+    
+    console.log('Progress update:', participant.name, 'WPM:', participant.currentWpm, 'Accuracy:', participant.accuracy)
     
     // Broadcast progress to all participants
     this.broadcast({
       type: 'PARTICIPANT_PROGRESS',
       participantId,
-      progress: message.progress,
-      currentWpm: message.currentWpm,
-      accuracy: message.accuracy
+      progress: participant.progress,
+      currentWpm: participant.currentWpm,
+      accuracy: participant.accuracy
     })
   }
 
@@ -249,8 +251,11 @@ export class RoomDurableObject {
     participant.completed = true
     participant.finishedAt = Date.now()
     participant.wpm = message.wpm
+    participant.currentWpm = message.wpm  // Also update currentWpm for leaderboard
     participant.accuracy = message.accuracy
     participant.progress = 100
+    
+    console.log('Complete:', participant.name, 'WPM:', message.wpm, 'Accuracy:', message.accuracy)
     
     // Update database
     try {
@@ -385,40 +390,31 @@ export class RoomDurableObject {
     
     const participants = Array.from(this.roomState.participants.values())
     
-    // Sort by: completed first, then by WPM, then by accuracy, then by finish time
+    console.log('Calculating leaderboard, participants:', participants.map(p => ({
+      name: p.name,
+      currentWpm: p.currentWpm,
+      accuracy: p.accuracy
+    })))
+    
+    // Simply use the live progress values (currentWpm and accuracy)
     return participants
       .map(p => ({
         id: p.id,
         name: p.name,
-        // Use final wpm if completed, otherwise use currentWpm
-        wpm: p.completed && p.wpm !== undefined ? p.wpm : p.currentWpm || 0,
-        accuracy: p.accuracy,
-        completed: p.completed,
-        finishedAt: p.finishedAt
+        wpm: p.currentWpm || 0,
+        accuracy: p.accuracy || 0
       }))
       .sort((a, b) => {
-        // Completed participants come first
-        if (a.completed !== b.completed) return a.completed ? -1 : 1
-        
-        // Then sort by WPM
+        // Sort by WPM first
         if (a.wpm !== b.wpm) return b.wpm - a.wpm
-        
         // Then by accuracy
-        if (a.accuracy !== b.accuracy) return b.accuracy - a.accuracy
-        
-        // Then by finish time (earlier is better)
-        if (a.finishedAt && b.finishedAt) {
-          return a.finishedAt - b.finishedAt
-        }
-        
-        return 0
+        return b.accuracy - a.accuracy
       })
       .map((p, index) => ({
         rank: index + 1,
         name: p.name,
         wpm: p.wpm,
-        accuracy: p.accuracy,
-        completed: p.completed
+        accuracy: p.accuracy
       }))
   }
 

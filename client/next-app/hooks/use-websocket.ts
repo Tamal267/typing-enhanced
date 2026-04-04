@@ -135,8 +135,8 @@ export function useWebSocket(roomCode: string, userName: string | null) {
         }, 3000)
       }
 
-      ws.onerror = (err) => {
-        console.error('WebSocket error:', err, 'URL:', ws.url)
+      ws.onerror = () => {
+        console.error('WebSocket error for URL:', ws.url, 'readyState:', ws.readyState)
         setError('Connection error')
       }
 
