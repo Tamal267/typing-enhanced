@@ -9,6 +9,7 @@ interface Participant {
   accuracy: number
   completed: boolean
   finishedAt?: number
+  wpm?: number  // Final WPM when completed
 }
 
 interface RoomState {
@@ -191,7 +192,7 @@ export class RoomDurableObject {
       ws: ws,
       progress: 0,
       currentWpm: 0,
-      accuracy: 0,
+      accuracy: 100,  // Start at 100% accuracy
       completed: false
     }
     
