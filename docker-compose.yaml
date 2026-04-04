@@ -1,0 +1,45 @@
+services:
+  server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: typing-enhanced-server
+    user: "1000:1000"
+    ports:
+      - "8787:8787"
+    volumes:
+      # Mount source code for hot reload
+      - ./server/src:/app/src
+      - ./server/wrangler.jsonc:/app/wrangler.jsonc
+      # Prevent node_modules from being overwritten
+      - /app/node_modules
+    environment:
+      - NODE_ENV=development
+    networks:
+      - typing-enhanced-network
+
+  client:
+    build:
+      context: ./client/next-app
+      dockerfile: Dockerfile
+    container_name: typing-enhanced-client
+    user: "1000:1000"
+    ports:
+      - "3000:3000"
+    volumes:
+      # Mount source code for hot reload
+      - ./client/next-app:/app
+      # Prevent node_modules from being overwritten
+      - /app/node_modules
+      - /app/.next
+    environment:
+      - NODE_ENV=development
+      - WATCHPACK_POLLING=true
+    networks:
+      - typing-enhanced-network
+    depends_on:
+      - server
+
+networks:
+  typing-enhanced-network:
+    driver: bridge
