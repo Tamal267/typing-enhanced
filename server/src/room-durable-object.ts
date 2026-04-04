@@ -308,16 +308,19 @@ export class RoomDurableObject {
       timeLimit: this.roomState.timeLimit
     })
     
-    // Set timer to end game
+    // Set timer to end game (add 500ms buffer to allow final COMPLETE messages)
     setTimeout(() => {
       this.endGame()
-    }, this.roomState.timeLimit * 1000)
+    }, (this.roomState.timeLimit * 1000) + 500)
   }
 
   private async endGame() {
     if (!this.roomState || this.roomState.status === 'completed') return
     
     this.roomState.status = 'completed'
+    
+    // Small delay to ensure any final messages are processed
+    await new Promise(resolve => setTimeout(resolve, 200))
     
     // Update database
     try {
