@@ -34,41 +34,11 @@ export class RoomDurableObject {
     this.env = env
   }
 
-  private async loadRoomState(): Promise<RoomState | null> {
-    if (this.roomState) return this.roomState
-    
-    const stored = await this.state.storage.get<any>('roomState')
-    if (stored) {
-      this.roomState = {
-        ...stored,
-        participants: new Map()
-      }
-    }
-    return this.roomState
-  }
-
-  private async saveRoomState(): Promise<void> {
-    if (!this.roomState) return
-    // Store without participants (Map can't be serialized, and they're transient anyway)
-    await this.state.storage.put('roomState', {
-      roomId: this.roomState.roomId,
-      roomCode: this.roomState.roomCode,
-      status: this.roomState.status,
-      timeLimit: this.roomState.timeLimit,
-      wordSet: this.roomState.wordSet,
-      scheduledStartTime: this.roomState.scheduledStartTime,
-      startedAt: this.roomState.startedAt
-    })
-  }
-
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url)
     
     // Handle WebSocket upgrade
     if (request.headers.get('Upgrade') === 'websocket') {
-      // Load state before accepting WebSocket
-      await this.loadRoomState()
-      
       const pair = new WebSocketPair()
       const [client, server] = Object.values(pair)
       
@@ -88,6 +58,24 @@ export class RoomDurableObject {
         headers: { 'Content-Type': 'application/json' }
       })
     }
+
+    if (url.pathname === '/state') {
+      return new Response(JSON.stringify({
+        success: true,
+        roomState: this.getRoomStateForClient()
+      }), {
+        headers: { 'Content-Type': 'application/json' }
+      })
+    }
+
+    if (url.pathname === '/leaderboard') {
+      return new Response(JSON.stringify({
+        success: true,
+        leaderboard: this.calculateLeaderboard()
+      }), {
+        headers: { 'Content-Type': 'application/json' }
+      })
+    }
     
     return new Response('Not found', { status: 404 })
   }
@@ -102,9 +90,6 @@ export class RoomDurableObject {
       scheduledStartTime: data.scheduledStartTime,
       participants: new Map()
     }
-    
-    // Persist the room state
-    await this.saveRoomState()
     
     // Set up auto-start timer if scheduled
     if (data.scheduledStartTime) {
@@ -198,15 +183,6 @@ export class RoomDurableObject {
     
     this.roomState.participants.set(participantId, participant)
     
-    // Save participant to database
-    try {
-      await this.env.my_db.prepare(
-        'INSERT INTO room_participants (id, room_id, user_name) VALUES (?, ?, ?)'
-      ).bind(participantId, this.roomState.roomId, message.name).run()
-    } catch (error) {
-      console.error('Failed to save participant to DB:', error)
-    }
-    
     // Send join confirmation with room data
     ws.send(JSON.stringify({
       type: 'JOINED',
@@ -250,36 +226,20 @@ export class RoomDurableObject {
     
     participant.completed = true
     participant.finishedAt = Date.now()
-    participant.wpm = message.wpm
-    participant.currentWpm = message.wpm  // Also update currentWpm for leaderboard
-    participant.accuracy = message.accuracy
+    // Keep latest live values if COMPLETE payload is missing/zero.
+    const finalWpm = typeof message.wpm === 'number' && message.wpm > 0
+      ? message.wpm
+      : participant.currentWpm
+    const finalAccuracy = typeof message.accuracy === 'number' && message.accuracy > 0
+      ? message.accuracy
+      : participant.accuracy
+
+    participant.wpm = finalWpm
+    participant.currentWpm = finalWpm
+    participant.accuracy = finalAccuracy
     participant.progress = 100
     
-    console.log('Complete:', participant.name, 'WPM:', message.wpm, 'Accuracy:', message.accuracy)
-    
-    // Update database
-    try {
-      await this.env.my_db.prepare(
-        'UPDATE room_participants SET completed = TRUE, wpm = ?, accuracy = ?, progress = 100, finished_at = CURRENT_TIMESTAMP WHERE id = ?'
-      ).bind(message.wpm, message.accuracy, participantId).run()
-      
-      // Create typing session record
-      await this.env.my_db.prepare(
-        'INSERT INTO typing_sessions (room_id, participant_id, total_keystrokes, correct_keystrokes, errors, wpm, accuracy, duration, started_at, completed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)'
-      ).bind(
-        this.roomState.roomId,
-        participantId,
-        message.totalKeystrokes || 0,
-        message.correctKeystrokes || 0,
-        message.errors || 0,
-        message.wpm,
-        message.accuracy,
-        message.duration || this.roomState.timeLimit,
-        new Date(this.roomState.startedAt!).toISOString()
-      ).run()
-    } catch (error) {
-      console.error('Failed to save completion to DB:', error)
-    }
+    console.log('Complete:', participant.name, 'WPM:', participant.currentWpm, 'Accuracy:', participant.accuracy)
     
     // Check if all participants completed or time is up
     const allCompleted = Array.from(this.roomState.participants.values()).every(p => p.completed)
@@ -296,15 +256,6 @@ export class RoomDurableObject {
     
     this.roomState.status = 'active'
     this.roomState.startedAt = Date.now()
-    
-    // Update database
-    try {
-      await this.env.my_db.prepare(
-        'UPDATE rooms SET status = ?, started_at = CURRENT_TIMESTAMP WHERE id = ?'
-      ).bind('active', this.roomState.roomId).run()
-    } catch (error) {
-      console.error('Failed to update room status in DB:', error)
-    }
     
     // Broadcast game start
     this.broadcast({
@@ -326,15 +277,6 @@ export class RoomDurableObject {
     
     // Small delay to ensure any final messages are processed
     await new Promise(resolve => setTimeout(resolve, 200))
-    
-    // Update database
-    try {
-      await this.env.my_db.prepare(
-        'UPDATE rooms SET status = ?, completed_at = CURRENT_TIMESTAMP WHERE id = ?'
-      ).bind('completed', this.roomState.roomId).run()
-    } catch (error) {
-      console.error('Failed to update room completion in DB:', error)
-    }
     
     // Calculate leaderboard
     const leaderboard = this.calculateLeaderboard()
@@ -363,20 +305,6 @@ export class RoomDurableObject {
       p.wpm = undefined
     })
     
-    // Update database
-    try {
-      await this.env.my_db.prepare(
-        'UPDATE rooms SET status = ?, started_at = NULL, completed_at = NULL WHERE id = ?'
-      ).bind('waiting', this.roomState.roomId).run()
-      
-      // Reset participants in DB
-      await this.env.my_db.prepare(
-        'UPDATE room_participants SET progress = 0, current_wpm = 0, wpm = 0, accuracy = 0, completed = FALSE, finished_at = NULL WHERE room_id = ?'
-      ).bind(this.roomState.roomId).run()
-    } catch (error) {
-      console.error('Failed to restart game in DB:', error)
-    }
-    
     // Broadcast restart
     this.broadcast({
       type: 'GAME_RESTARTED'
@@ -392,17 +320,18 @@ export class RoomDurableObject {
     
     console.log('Calculating leaderboard, participants:', participants.map(p => ({
       name: p.name,
+      finalWpm: p.wpm,
       currentWpm: p.currentWpm,
       accuracy: p.accuracy
     })))
     
-    // Simply use the live progress values (currentWpm and accuracy)
+    // Prefer final completion metrics, then fall back to live values.
     return participants
       .map(p => ({
         id: p.id,
         name: p.name,
-        wpm: p.currentWpm || 0,
-        accuracy: p.accuracy || 0
+        wpm: p.wpm ?? p.currentWpm ?? 0,
+        accuracy: p.accuracy ?? 0
       }))
       .sort((a, b) => {
         // Sort by WPM first
@@ -434,6 +363,7 @@ export class RoomDurableObject {
       roomCode: this.roomState.roomCode,
       status: this.roomState.status,
       timeLimit: this.roomState.timeLimit,
+      scheduledStartTime: this.roomState.scheduledStartTime,
       wordSet: this.roomState.wordSet,
       startedAt: this.roomState.startedAt,
       participants: Array.from(this.roomState.participants.values()).map(p => ({

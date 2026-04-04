@@ -40,6 +40,7 @@ export function useWebSocket(roomCode: string, userName: string | null) {
   const handlersRef = useRef<Map<string, MessageHandler>>(new Map())
   const reconnectTimeoutRef = useRef<any>(null)
   const pingIntervalRef = useRef<any>(null)
+  const connectRef = useRef<() => void>(() => {})
 
   const connect = useCallback(() => {
     if (!userName || wsRef.current?.readyState === WebSocket.OPEN) return
@@ -131,7 +132,7 @@ export function useWebSocket(roomCode: string, userName: string | null) {
         
         // Attempt reconnect after 3 seconds
         reconnectTimeoutRef.current = setTimeout(() => {
-          if (userName) connect()
+          if (userName) connectRef.current()
         }, 3000)
       }
 
@@ -146,6 +147,10 @@ export function useWebSocket(roomCode: string, userName: string | null) {
       setError('Failed to connect to room')
     }
   }, [roomCode, userName])
+
+  useEffect(() => {
+    connectRef.current = connect
+  }, [connect])
 
   const disconnect = useCallback(() => {
     if (wsRef.current) {

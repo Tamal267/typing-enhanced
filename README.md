@@ -41,7 +41,7 @@ Serverless backend deployed on Cloudflare Workers.
 **Tech Stack:**
 - [Cloudflare Workers](https://workers.cloudflare.com/) - Serverless edge compute
 - [Hono](https://hono.dev/) - Lightweight web framework
-- [Cloudflare D1](https://developers.cloudflare.com/d1/) - SQLite database
+- [Cloudflare D1](https://developers.cloudflare.com/d1/) - Word list storage
 - [Durable Objects](https://developers.cloudflare.com/durable-objects/) - WebSocket state management
 - TypeScript - Type safety
 
@@ -107,8 +107,8 @@ SERVER_URL=https://your-worker.workers.dev
 The D1 database contains:
 
 - **words** - Word list with difficulty levels (1=Easy, 2=Medium, 3=Hard)
-- **rooms** - Multiplayer room metadata
-- **room_participants** - Player data for each room
+
+Multiplayer rooms and participants are **temporary** and kept in Durable Object runtime state (not persisted to D1).
 
 ## Multiplayer Flow
 

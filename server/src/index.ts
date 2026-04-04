@@ -6,6 +6,11 @@ export { RoomDurableObject } from './room-durable-object'
 
 const app = new Hono<{ Bindings: Env }>()
 
+function getRoomDoStub(env: Env, roomCode: string) {
+  const doId = env.ROOM_DO.idFromName(roomCode.toUpperCase())
+  return env.ROOM_DO.get(doId)
+}
+
 // Enable CORS for frontend
 app.use('/*', cors())
 
@@ -89,7 +94,7 @@ app.post('/api/rooms/create', async (c) => {
     
     // Generate unique room code
     const roomCode = generateRoomCode()
-    const roomId = crypto.randomUUID()
+    const roomId = roomCode
     
     // Fetch random words for the room (filtered by difficulty if specified)
     const wordLimit = Math.ceil(timeLimit * 3)
@@ -106,16 +111,8 @@ app.post('/api/rooms/create', async (c) => {
     const { results } = await c.env.my_db.prepare(query).bind(...params).all()
     
     const words = results?.map((r: any) => r.word) || []
-    const wordSet = JSON.stringify(words)
-    
-    // Insert room into database
-    await c.env.my_db.prepare(
-      'INSERT INTO rooms (id, room_code, time, status, scheduled_start_time, max_participants, word_set) VALUES (?, ?, ?, ?, ?, ?, ?)'
-    ).bind(roomId, roomCode, timeLimit, 'waiting', scheduledStartTime, maxParticipants, wordSet).run()
-    
     // Initialize Durable Object
-    const doId = c.env.ROOM_DO.idFromName(roomId)
-    const doStub = c.env.ROOM_DO.get(doId)
+    const doStub = getRoomDoStub(c.env, roomCode)
     
     await doStub.fetch('http://do/initialize', {
       method: 'POST',
@@ -153,39 +150,32 @@ app.post('/api/rooms/create', async (c) => {
 app.get('/api/rooms/:code', async (c) => {
   try {
     const roomCode = c.req.param('code').toUpperCase()
-    
-    const { results } = await c.env.my_db.prepare(
-      'SELECT id, room_code, time, status, scheduled_start_time, max_participants, word_set, created_at FROM rooms WHERE room_code = ?'
-    ).bind(roomCode).all()
-    
-    if (!results || results.length === 0) {
+    const doStub = getRoomDoStub(c.env, roomCode)
+    const stateResponse = await doStub.fetch('http://do/state')
+    const stateData = await stateResponse.json() as any
+
+    if (!stateData?.success || !stateData?.roomState) {
       return c.json({
         success: false,
         error: 'Room not found'
       }, 404)
     }
-    
-    const room = results[0] as any
-    
-    // Get participant count
-    const { results: participantResults } = await c.env.my_db.prepare(
-      'SELECT COUNT(*) as count FROM room_participants WHERE room_id = ?'
-    ).bind(room.id).all()
-    
-    const participantCount = (participantResults?.[0] as any)?.count || 0
+
+    const room = stateData.roomState as any
+    const participantCount = Array.isArray(room.participants) ? room.participants.length : 0
     
     return c.json({
       success: true,
       room: {
-        id: room.id,
-        roomCode: room.room_code,
-        timeLimit: room.time,
+        id: room.roomId,
+        roomCode: room.roomCode,
+        timeLimit: room.timeLimit,
         status: room.status,
-        scheduledStartTime: room.scheduled_start_time,
-        maxParticipants: room.max_participants,
+        scheduledStartTime: room.scheduledStartTime ?? null,
+        maxParticipants: 10,
         participantCount,
-        wordSet: JSON.parse(room.word_set || '[]'),
-        createdAt: room.created_at
+        wordSet: room.wordSet || [],
+        createdAt: null
       }
     })
   } catch (error) {
@@ -207,20 +197,15 @@ app.get('/api/rooms/:code/ws', async (c) => {
       return c.json({ error: 'Expected WebSocket connection' }, 426)
     }
     
-    // Get room ID from code
-    const { results } = await c.env.my_db.prepare(
-      'SELECT id FROM rooms WHERE room_code = ?'
-    ).bind(roomCode).all()
-    
-    if (!results || results.length === 0) {
+    // Get Durable Object and proxy WebSocket connection
+    const doStub = getRoomDoStub(c.env, roomCode)
+
+    // Ensure room exists before upgrading WebSocket
+    const stateResponse = await doStub.fetch('http://do/state')
+    const stateData = await stateResponse.json() as any
+    if (!stateData?.success || !stateData?.roomState) {
       return c.json({ error: 'Room not found' }, 404)
     }
-    
-    const roomId = (results[0] as any).id
-    
-    // Get Durable Object and proxy WebSocket connection
-    const doId = c.env.ROOM_DO.idFromName(roomId)
-    const doStub = c.env.ROOM_DO.get(doId)
     
     return doStub.fetch(c.req.raw)
   } catch (error) {
@@ -234,32 +219,17 @@ app.get('/api/rooms/:code/ws', async (c) => {
 app.get('/api/rooms/:code/leaderboard', async (c) => {
   try {
     const roomCode = c.req.param('code').toUpperCase()
-    
-    const { results: roomResults } = await c.env.my_db.prepare(
-      'SELECT id FROM rooms WHERE room_code = ?'
-    ).bind(roomCode).all()
-    
-    if (!roomResults || roomResults.length === 0) {
+    const doStub = getRoomDoStub(c.env, roomCode)
+    const lbResponse = await doStub.fetch('http://do/leaderboard')
+    const lbData = await lbResponse.json() as any
+
+    if (!lbData?.success) {
       return c.json({ error: 'Room not found' }, 404)
     }
     
-    const roomId = (roomResults[0] as any).id
-    
-    // Get participants with their stats
-    const { results } = await c.env.my_db.prepare(
-      'SELECT user_name, wpm, accuracy, completed, finished_at FROM room_participants WHERE room_id = ? ORDER BY completed DESC, wpm DESC, accuracy DESC, finished_at ASC'
-    ).bind(roomId).all()
-    
-    const leaderboard = (results || []).map((p: any, index: number) => ({
-      rank: index + 1,
-      name: p.user_name,
-      wpm: p.wpm,
-      accuracy: p.accuracy
-    }))
-    
     return c.json({
       success: true,
-      leaderboard
+      leaderboard: lbData.leaderboard || []
     })
   } catch (error) {
     return c.json({
@@ -280,60 +250,17 @@ function generateRoomCode(): string {
 }
 
 app.get('/api/create-room', async (c) => {
-  try {
-    const roomId = crypto.randomUUID()
-    // random room name of 5 characters
-    const roomName = Math.random().toString(36).substring(2, 7).toUpperCase()
-    const time = parseInt(c.req.query('time') || '60') // default 60 seconds
-    
-    const query = 'INSERT INTO rooms (id, name, time, status) VALUES (?, ?, ?, ?)'
-    const params = [roomId, roomName, time, 'waiting']
-    
-    await c.env.my_db.prepare(query).bind(...params).run()
-    
-    return c.json({
-      success: true,
-      room: {
-        id: roomId,
-        name: roomName,
-        time: time,
-        status: 'waiting'
-      }
-    })
-  } catch (error) {
-    return c.json({
-      success: false,
-      error: error instanceof Error ? error.message : 'Failed to create room'
-    }, 500)
-  }
+  return c.json({
+    success: false,
+    error: 'Deprecated endpoint. Use POST /api/rooms/create.'
+  }, 410)
 })
 
 app.post('/api/add-user', async (c) => {
-  try {
-    const { roomId, username, wpm, accuracy } = await c.req.json()
-    const userId = crypto.randomUUID()
-    
-    const query = 'INSERT INTO users (id, room_id, username, wpm, accuracy) VALUES (?, ?, ?, ?, ?)'
-    const params = [userId, roomId, username, wpm, accuracy]
-    
-    await c.env.my_db.prepare(query).bind(...params).run()
-    
-    return c.json({
-      success: true,
-      user: {
-        id: userId,
-        roomId,
-        username,
-        wpm,
-        accuracy
-      }
-    })
-  } catch (error) {
-    return c.json({
-      success: false, 
-      error: error instanceof Error ? error.message : 'Failed to add user'
-    }, 500)
-  }
+  return c.json({
+    success: false,
+    error: 'Deprecated endpoint. Users are managed in room WebSocket sessions.'
+  }, 410)
 })
 
 export default app
