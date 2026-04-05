@@ -1,5 +1,7 @@
 # Typing Enhanced
 
+**Enhanced version of [typing](https://github.com/Tamal267/typing).**
+
 A modern typing practice application with solo and multiplayer modes. Test and improve your typing speed and accuracy with curated word lists.
 
 ## Features
