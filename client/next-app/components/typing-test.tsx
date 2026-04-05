@@ -37,12 +37,62 @@ export function TypingTest() {
   const [displayOffset, setDisplayOffset] = useState(0)
   const [difficulty, setDifficulty] = useState<number | null>(null)
   const [mounted, setMounted] = useState(false)
+  const [lines, setLines] = useState<number[][]>([]) // Array of arrays containing word indices per line
+  const [currentLineIndex, setCurrentLineIndex] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
+  const wordsContainerRef = useRef<HTMLDivElement>(null)
 
   // Prevent hydration mismatch from browser extensions like Dark Reader
   useEffect(() => {
     setMounted(true)
   }, [])
+
+  // Calculate lines based on word widths
+  useEffect(() => {
+    if (!wordsContainerRef.current || words.length === 0) return
+
+    const calculateLines = () => {
+      const container = wordsContainerRef.current
+      if (!container) return
+
+      // Account for padding: p-8 = 32px on each side = 64px total
+      const containerWidth = container.offsetWidth - 64
+      const tempSpan = document.createElement('span')
+      tempSpan.style.cssText = 'font-family: monospace; font-size: 1.875rem; visibility: hidden; position: absolute;'
+      document.body.appendChild(tempSpan)
+
+      const newLines: number[][] = []
+      let currentLine: number[] = []
+      let currentWidth = 0
+      const spaceWidth = 12 // gap-x-3 = 0.75rem = 12px
+
+      for (let i = 0; i < words.length; i++) {
+        tempSpan.textContent = words[i].word
+        const wordWidth = tempSpan.offsetWidth
+
+        if (currentWidth + wordWidth + (currentLine.length > 0 ? spaceWidth : 0) > containerWidth && currentLine.length > 0) {
+          // Start a new line when we exceed container width
+          newLines.push([...currentLine])
+          currentLine = [i]
+          currentWidth = wordWidth
+        } else {
+          currentLine.push(i)
+          currentWidth += wordWidth + (currentLine.length > 1 ? spaceWidth : 0)
+        }
+      }
+
+      if (currentLine.length > 0) {
+        newLines.push(currentLine)
+      }
+
+      document.body.removeChild(tempSpan)
+      setLines(newLines)
+    }
+
+    calculateLines()
+    window.addEventListener('resize', calculateLines)
+    return () => window.removeEventListener('resize', calculateLines)
+  }, [words])
 
   // Fetch words on mount and when difficulty changes
   useEffect(() => {
@@ -97,6 +147,7 @@ export function TypingTest() {
     setTypedChars(0)
     setTypedWords([])
     setDisplayOffset(0)
+    setCurrentLineIndex(0)
     inputRef.current?.focus()
   }
 
@@ -111,6 +162,7 @@ export function TypingTest() {
     setTypedChars(0)
     setTypedWords([])
     setDisplayOffset(0)
+    setCurrentLineIndex(0)
     fetchWords()
   }
 
@@ -146,10 +198,13 @@ export function TypingTest() {
       setCurrentWordIndex(nextIndex)
       setCurrentInput('')
 
-      // Move display window when we've typed 30 words
-      const wordsInWindow = 30
-      if (nextIndex - displayOffset >= wordsInWindow) {
-        setDisplayOffset(nextIndex)
+      // Check if we've finished the current line
+      if (lines.length > 0) {
+        const currentLine = lines[currentLineIndex]
+        if (currentLine && nextIndex > currentLine[currentLine.length - 1]) {
+          // Move to next line
+          setCurrentLineIndex(prev => prev + 1)
+        }
       }
 
       // Fetch more words if running low
@@ -372,16 +427,30 @@ export function TypingTest() {
         <CardContent className="pt-6">
           {!isFinished ? (
             <div className="space-y-6">
-              {/* Words Display */}
-              <div className="relative min-h-[160px] rounded-xl bg-gradient-to-br from-muted/50 to-muted/30 p-8 backdrop-blur">
-                <div className="flex flex-wrap gap-x-3 gap-y-4 text-2xl md:text-3xl leading-relaxed font-mono">
-                  {words.slice(displayOffset, displayOffset + 30).map((word, index) => (
-                    <span
-                      key={word.id || index}
-                      className={getWordClassName(displayOffset + index, word.word)}
+              {/* Words Display - Two Lines Only */}
+              <div 
+                ref={wordsContainerRef}
+                className="relative min-h-40 rounded-xl bg-linear-to-br from-muted/50 to-muted/30 p-8 backdrop-blur overflow-hidden"
+              >
+                <div className="space-y-4">
+                  {lines.slice(currentLineIndex, currentLineIndex + 2).map((lineWordIndices, lineIdx) => (
+                    <div 
+                      key={`line-${currentLineIndex + lineIdx}`}
+                      className="flex flex-wrap gap-x-3 text-2xl md:text-3xl leading-relaxed font-mono"
                     >
-                      {word.word}
-                    </span>
+                      {lineWordIndices.map((wordIndex) => {
+                        const word = words[wordIndex]
+                        if (!word) return null
+                        return (
+                          <span
+                            key={word.id || wordIndex}
+                            className={getWordClassName(wordIndex, word.word)}
+                          >
+                            {word.word}
+                          </span>
+                        )
+                      })}
+                    </div>
                   ))}
                 </div>
               </div>

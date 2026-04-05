@@ -10,8 +10,6 @@ interface MultiplayerTypingProps {
   onComplete: (wpm: number, accuracy: number, stats: any) => void
 }
 
-const WORDS_PER_PAGE = 30
-
 export function MultiplayerTyping({ roomState, participantId, onProgress, onComplete }: MultiplayerTypingProps) {
   const [currentWordIndex, setCurrentWordIndex] = useState(0)
   const [input, setInput] = useState('')
@@ -22,17 +20,15 @@ export function MultiplayerTyping({ roomState, participantId, onProgress, onComp
   const [isFinished, setIsFinished] = useState(false)
   const [timeRemaining, setTimeRemaining] = useState(roomState.timeLimit)
   const [wordResults, setWordResults] = useState<('correct' | 'incorrect')[]>([])
-  const [currentPage, setCurrentPage] = useState(0)
+  const [lines, setLines] = useState<number[][]>([]) // Array of arrays containing word indices per line
+  const [currentLineIndex, setCurrentLineIndex] = useState(0)
 
   const inputRef = useRef<HTMLInputElement>(null)
   const progressIntervalRef = useRef<any>(null)
+  const wordsContainerRef = useRef<HTMLDivElement>(null)
 
   const words = roomState.wordSet || []
   const currentWord = words[currentWordIndex]
-  
-  const pageStart = currentPage * WORDS_PER_PAGE
-  const pageEnd = pageStart + WORDS_PER_PAGE
-  const currentPageWords = words.slice(pageStart, pageEnd)
 
   const calculateWPM = () => {
     if (!startTime) return 0
@@ -64,6 +60,54 @@ export function MultiplayerTyping({ roomState, participantId, onProgress, onComp
   useEffect(() => {
     inputRef.current?.focus()
   }, [])
+
+  // Calculate lines based on word widths
+  useEffect(() => {
+    if (!wordsContainerRef.current || words.length === 0) return
+
+    const calculateLines = () => {
+      const container = wordsContainerRef.current
+      if (!container) return
+
+      // Account for padding: p-8 = 32px on each side = 64px total
+      const containerWidth = container.offsetWidth - 64
+      const tempSpan = document.createElement('span')
+      tempSpan.className = 'text-2xl'
+      tempSpan.style.cssText = 'visibility: hidden; position: absolute; white-space: nowrap;'
+      container.appendChild(tempSpan)
+
+      const newLines: number[][] = []
+      let currentLine: number[] = []
+      let currentWidth = 0
+      const spaceWidth = 8 // gap-2 = 0.5rem = 8px
+
+      for (let i = 0; i < words.length; i++) {
+        tempSpan.textContent = words[i]
+        const wordWidth = tempSpan.offsetWidth
+
+        if (currentWidth + wordWidth + (currentLine.length > 0 ? spaceWidth : 0) > containerWidth && currentLine.length > 0) {
+          // Start a new line when we exceed container width
+          newLines.push([...currentLine])
+          currentLine = [i]
+          currentWidth = wordWidth
+        } else {
+          currentLine.push(i)
+          currentWidth += wordWidth + (currentLine.length > 1 ? spaceWidth : 0)
+        }
+      }
+
+      if (currentLine.length > 0) {
+        newLines.push(currentLine)
+      }
+
+      container.removeChild(tempSpan)
+      setLines(newLines)
+    }
+
+    calculateLines()
+    window.addEventListener('resize', calculateLines)
+    return () => window.removeEventListener('resize', calculateLines)
+  }, [words])
 
   useEffect(() => {
     if (!roomState.startedAt) return
@@ -129,9 +173,13 @@ export function MultiplayerTyping({ roomState, participantId, onProgress, onComp
         const nextIndex = currentWordIndex + 1
         setCurrentWordIndex(nextIndex)
         
-        // Move to next page if needed
-        if (nextIndex >= pageEnd) {
-          setCurrentPage(prev => prev + 1)
+        // Check if we've finished the current line
+        if (lines.length > 0) {
+          const currentLine = lines[currentLineIndex]
+          if (currentLine && nextIndex > currentLine[currentLine.length - 1]) {
+            // Move to next line
+            setCurrentLineIndex(prev => prev + 1)
+          }
         }
       } else {
         setIsFinished(true)
@@ -156,7 +204,7 @@ export function MultiplayerTyping({ roomState, participantId, onProgress, onComp
     } else if (result === 'incorrect') {
       return 'text-red-500 line-through'
     } else if (globalIndex === currentWordIndex) {
-      return 'text-primary font-semibold underline underline-offset-4'
+      return 'text-primary underline underline-offset-4'
     } else {
       return 'text-muted-foreground'
     }
@@ -181,20 +229,31 @@ export function MultiplayerTyping({ roomState, participantId, onProgress, onComp
         </div>
       </div>
 
-      {/* Word Display */}
-      <div className="border rounded-lg p-8 bg-muted/30 min-h-[200px]">
-        <div className="text-2xl leading-relaxed flex flex-wrap gap-2">
-          {currentPageWords.map((word, idx) => {
-            const globalIndex = pageStart + idx
-            return (
-              <span key={globalIndex} className={getWordClassName(globalIndex)}>
-                {word}
-              </span>
-            )
-          })}
+      {/* Word Display - Two Lines Only */}
+      <div 
+        ref={wordsContainerRef}
+        className="border rounded-lg p-8 bg-muted/30 min-h-50"
+      >
+        <div className="space-y-4">
+          {lines.slice(currentLineIndex, currentLineIndex + 2).map((lineWordIndices, lineIdx) => (
+            <div 
+              key={`line-${currentLineIndex + lineIdx}`}
+              className="flex flex-wrap gap-2 text-2xl leading-relaxed"
+            >
+              {lineWordIndices.map((wordIndex) => {
+                const word = words[wordIndex]
+                if (!word) return null
+                return (
+                  <span key={wordIndex} className={getWordClassName(wordIndex)}>
+                    {word}
+                  </span>
+                )
+              })}
+            </div>
+          ))}
         </div>
         <div className="text-sm text-muted-foreground mt-4 text-right">
-          Page {currentPage + 1} • Word {currentWordIndex + 1}/{words.length}
+          Word {currentWordIndex + 1}/{words.length}
         </div>
       </div>
 
