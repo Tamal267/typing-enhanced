@@ -204,7 +204,7 @@ export function MultiplayerTyping({ roomState, participantId, onProgress, onComp
     } else if (result === 'incorrect') {
       return 'text-red-500 line-through'
     } else if (globalIndex === currentWordIndex) {
-      return 'text-primary underline underline-offset-4'
+      return 'text-foreground underline underline-offset-4'
     } else {
       return 'text-muted-foreground'
     }

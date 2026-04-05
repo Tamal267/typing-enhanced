@@ -246,8 +246,8 @@ export function TypingTest() {
         'relative',
         'after:absolute after:-bottom-1 after:left-0 after:h-0.5 after:w-full',
         isTypingCorrect 
-          ? 'after:bg-primary text-primary font-semibold' 
-          : 'after:bg-destructive text-destructive font-semibold'
+          ? 'after:bg-foreground text-foreground' 
+          : 'after:bg-destructive text-destructive'
       )
     } else if (index === currentWordIndex + 1) {
       return 'opacity-60'
