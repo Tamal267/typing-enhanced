@@ -1,26 +1,25 @@
-# Client Dockerfile for development
 FROM node:20-alpine
 
-# Create a non-root user matching host UID
-RUN addgroup -g 1000 nodeuser && adduser -D -u 1000 -G nodeuser nodeuser
+RUN mkdir -p /app/.next && chown -R node:node /app
 
+# 1. Set working directory
 WORKDIR /app
 
-# Change ownership of the app directory
-RUN chown -R nodeuser:nodeuser /app
+# 2. Assign ownership of the directory to the existing 'node' user
+# We do this as root (the default) first
+RUN chown -R node:node /app
 
-# Switch to non-root user
-USER nodeuser
+# 3. Switch to the built-in 'node' user (UID 1000)
+USER node
 
-# Install dependencies
-COPY --chown=nodeuser:nodeuser package.json package-lock.json* ./
+# 4. Install dependencies
+# Using --chown ensures the files belong to 'node' immediately
+COPY --chown=node:node package.json package-lock.json* ./
 RUN npm install
 
-# Copy application code
-COPY --chown=nodeuser:nodeuser . .
+# 5. Copy the rest of the code
+COPY --chown=node:node . .
 
-# Expose Next.js development port
 EXPOSE 3000
 
-# Run development server
 CMD ["npm", "run", "dev"]

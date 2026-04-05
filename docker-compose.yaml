@@ -9,14 +9,13 @@ services:
       - "8787:8787"
     volumes:
       # Mount source code for hot reload
-      - ./server/src:/app/src
-      - ./server/wrangler.jsonc:/app/wrangler.jsonc
-      # Prevent node_modules from being overwritten
+      - ./server:/app
       - /app/node_modules
+      - ~/.config/.wrangler:/home/bun/.config/.wrangler
     environment:
       - NODE_ENV=development
     networks:
-      - typing-enhanced-network
+      - typing-enhanced-network # http://server:8787 have to use this in client env
 
   client:
     build:
@@ -36,7 +35,7 @@ services:
       - NODE_ENV=development
       - WATCHPACK_POLLING=true
     networks:
-      - typing-enhanced-network
+      - typing-enhanced-network # http://client:3000
     depends_on:
       - server
 
