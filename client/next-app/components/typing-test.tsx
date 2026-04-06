@@ -68,7 +68,7 @@ export function TypingTest() {
 
       for (let i = 0; i < words.length; i++) {
         tempSpan.textContent = words[i].word
-        const wordWidth = tempSpan.offsetWidth
+        const wordWidth = tempSpan.getBoundingClientRect().width
 
         if (currentWidth + wordWidth + (currentLine.length > 0 ? spaceWidth : 0) > containerWidth && currentLine.length > 0) {
           // Start a new line when we exceed container width
@@ -235,8 +235,8 @@ export function TypingTest() {
       const typedWord = typedWords[index]
       if (typedWord) {
         return typedWord.isCorrect 
-          ? 'text-green-500 font-medium' 
-          : 'text-red-500 font-medium'
+          ? 'text-green-500' 
+          : 'text-red-500'
       }
       return 'text-muted-foreground'
     } else if (index === currentWordIndex) {
